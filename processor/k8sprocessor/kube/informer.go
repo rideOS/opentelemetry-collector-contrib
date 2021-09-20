@@ -102,3 +102,30 @@ func namespaceInformerWatchFunc(client kubernetes.Interface) cache.WatchFunc {
 		return client.CoreV1().Namespaces().Watch(context.Background(), opts)
 	}
 }
+
+func newNodeSharedInformer(
+	client kubernetes.Interface,
+) cache.SharedInformer {
+	informer := cache.NewSharedInformer(
+		&cache.ListWatch{
+			ListFunc:  nodeInformerListFunc(client),
+			WatchFunc: nodesInformerWatchFunc(client),
+		},
+		&api_v1.Node{},
+		watchSyncPeriod,
+	)
+	return informer
+}
+
+func nodeInformerListFunc(client kubernetes.Interface) cache.ListFunc {
+	return func(opts metav1.ListOptions) (runtime.Object, error) {
+		return client.CoreV1().Nodes().List(context.Background(), opts)
+	}
+
+}
+
+func nodesInformerWatchFunc(client kubernetes.Interface) cache.WatchFunc {
+	return func(opts metav1.ListOptions) (watch.Interface, error) {
+		return client.CoreV1().Nodes().Watch(context.Background(), opts)
+	}
+}

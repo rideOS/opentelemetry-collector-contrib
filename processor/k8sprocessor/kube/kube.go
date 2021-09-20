@@ -50,6 +50,7 @@ var (
 type Client interface {
 	GetPod(PodIdentifier) (*Pod, bool)
 	GetNamespace(string) (*Namespace, bool)
+	GetNode(string) (*Node, bool)
 	Start()
 	Stop()
 }
@@ -81,6 +82,14 @@ type Namespace struct {
 	Attributes   map[string]string
 	StartTime    metav1.Time
 	DeletedAt    time.Time
+}
+
+// Node represent a k8s node
+type Node struct {
+	Name     string
+	HostName string
+	//Zone information for future
+	Attributes map[string]string
 }
 
 type deleteRequest struct {
