@@ -42,6 +42,7 @@ type WatchClient struct {
 	kc                kubernetes.Interface
 	informer          cache.SharedInformer
 	namespaceInformer cache.SharedInformer
+	nodeInformer      cache.SharedInformer
 	deploymentRegex   *regexp.Regexp
 	deleteQueue       []deleteRequest
 	stopCh            chan struct{}
@@ -57,6 +58,7 @@ type WatchClient struct {
 	// A map containing Namespace related data, used to associate them with resources.
 	// Key is namespace name
 	Namespaces map[string]*Namespace
+	Node       map[string]*Node
 }
 
 // Extract deployment name from the pod name. Pod name is created using
@@ -78,6 +80,7 @@ func New(logger *zap.Logger, apiCfg k8sconfig.APIConfig, rules ExtractionRules, 
 
 	c.Pods = map[PodIdentifier]*Pod{}
 	c.Namespaces = map[string]*Namespace{}
+	c.Node = map[string]*Node{}
 	if newClientSet == nil {
 		newClientSet = k8sconfig.MakeClient
 	}
@@ -111,6 +114,7 @@ func New(logger *zap.Logger, apiCfg k8sconfig.APIConfig, rules ExtractionRules, 
 	} else {
 		c.namespaceInformer = NewNoOpInformer(c.kc)
 	}
+	c.nodeInformer = newNodeSharedInformer(c.kc)
 	return c, err
 }
 
@@ -128,6 +132,12 @@ func (c *WatchClient) Start() {
 		DeleteFunc: c.handleNamespaceDelete,
 	})
 	go c.namespaceInformer.Run(c.stopCh)
+	c.nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    c.handleNodeAdd,
+		UpdateFunc: c.handleNodeUpdate,
+		DeleteFunc: c.handleNodeDelete,
+	})
+	go c.nodeInformer.Run(c.stopCh)
 }
 
 // Stop signals the the k8s watcher/informer to stop watching for new events.
@@ -203,6 +213,35 @@ func (c *WatchClient) handleNamespaceDelete(obj interface{}) {
 	}
 }
 
+func (c *WatchClient) handleNodeAdd(obj interface{}) {
+	if node, ok := obj.(*api_v1.Node); ok {
+		c.addOrUpdateNode(node)
+	} else {
+		c.logger.Error("object received was not of type api_v1.Node", zap.Any("received", obj))
+	}
+}
+
+func (c *WatchClient) handleNodeUpdate(old, new interface{}) {
+	if node, ok := new.(*api_v1.Node); ok {
+		c.addOrUpdateNode(node)
+	} else {
+		c.logger.Error("object received was not of type api_v1.Node", zap.Any("received", new))
+	}
+}
+
+func (c *WatchClient) handleNodeDelete(obj interface{}) {
+	if node, ok := obj.(*api_v1.Node); ok {
+		c.m.Lock()
+		if nd, ok := c.Node[node.Name]; ok {
+			// This code does not account for latency, upstream really needs to rewrite this. Leaving for now
+			delete(c.Node, nd.Name)
+		}
+		c.m.Unlock()
+	} else {
+		c.logger.Error("object received was not of type api_v1.Node", zap.Any("received", obj))
+	}
+}
+
 func (c *WatchClient) deleteLoop(interval time.Duration, gracePeriod time.Duration) {
 	// This loop runs after N seconds and deletes pods from cache.
 	// It iterates over the delete queue and deletes all that aren't
@@ -267,6 +306,18 @@ func (c *WatchClient) GetNamespace(namespace string) (*Namespace, bool) {
 		return ns, ok
 	}
 	return nil, false
+}
+
+// GetNode takes a namespace and returns the namespace object the namespace is associated with.
+func (c *WatchClient) GetNode(node string) (*Node, bool) {
+	c.m.RLock()
+	nd, ok := c.Node[node]
+	c.m.RUnlock()
+	if ok {
+		return nd, ok
+	}
+	return nil, false
+
 }
 
 func (c *WatchClient) extractPodAttributes(pod *api_v1.Pod) map[string]string {
@@ -495,6 +546,22 @@ func (c *WatchClient) addOrUpdateNamespace(namespace *api_v1.Namespace) {
 	if namespace.Name != "" {
 		c.Namespaces[namespace.Name] = newNamespace
 	}
+	c.m.Unlock()
+}
+
+func (c *WatchClient) addOrUpdateNode(node *api_v1.Node) {
+	nodeHostname := ""
+	for _, address := range node.Status.Addresses {
+		if address.Type == api_v1.NodeHostName {
+			nodeHostname = address.Address
+		}
+	}
+	newNode := &Node{
+		Name:     node.Name,
+		HostName: nodeHostname,
+	}
+	c.m.Lock()
+	c.Node[node.Name] = newNode
 	c.m.Unlock()
 }
 
