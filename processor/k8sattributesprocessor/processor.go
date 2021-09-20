@@ -31,6 +31,7 @@ import (
 const (
 	k8sIPLabelName    string = "k8s.pod.ip"
 	clientIPLabelName string = "ip"
+	TagNodeHostname          = "node.hostname"
 
 	// TODO: Use semantic convention defined in this PR:
 	//       https://github.com/open-telemetry/opentelemetry-specification/pull/1945
@@ -133,6 +134,12 @@ func (kp *kubernetesprocessor) processResource(ctx context.Context, resource pda
 			resource.Attributes().InsertString(key, val)
 		}
 	}
+	node := stringAttributeFromMap(resource.Attributes(), conventions.AttributeK8SNodeName)
+	//Add node information
+	attrsToAdd := kp.getAttributesForPodNode(node)
+	for key, val := range attrsToAdd {
+		resource.Attributes().InsertString(key, val)
+	}
 }
 
 // addContainerAttributes looks if pod has any container identifiers and adds additional container attributes
@@ -188,4 +195,12 @@ func intFromAttribute(val pdata.AttributeValue) (int, error) {
 	default:
 		return 0, fmt.Errorf("wrong attribute type %v, expected int", val.Type())
 	}
+}
+
+func (kp *kubernetesprocessor) getAttributesForPodNode(node string) map[string]string {
+	nd, ok := kp.kc.GetNode(node)
+	if !ok {
+		return nil
+	}
+	return map[string]string{TagNodeHostname: nd.HostName}
 }
