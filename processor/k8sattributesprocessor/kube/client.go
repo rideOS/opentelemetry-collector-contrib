@@ -308,7 +308,7 @@ func (c *WatchClient) GetNamespace(namespace string) (*Namespace, bool) {
 	return nil, false
 }
 
-// GetNode takes a namespace and returns the namespace object the namespace is associated with.
+// GetNode takes a node and returns the node object the namespace is associated with.
 func (c *WatchClient) GetNode(node string) (*Node, bool) {
 	c.m.RLock()
 	nd, ok := c.Node[node]
