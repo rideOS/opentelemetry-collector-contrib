@@ -29,6 +29,7 @@ import (
 const (
 	k8sIPLabelName    string = "k8s.pod.ip"
 	clientIPLabelName string = "ip"
+	TagNodeHostname          = "node.hostname"
 )
 
 type kubernetesprocessor struct {
@@ -129,6 +130,12 @@ func (kp *kubernetesprocessor) processResource(ctx context.Context, resource pda
 			resource.Attributes().InsertString(key, val)
 		}
 	}
+	node := stringAttributeFromMap(resource.Attributes(), conventions.AttributeK8SNodeName)
+	//Add node information
+	attrsToAdd := kp.getAttributesForPodNode(node)
+	for key, val := range attrsToAdd {
+		resource.Attributes().InsertString(key, val)
+	}
 }
 
 func (kp *kubernetesprocessor) getAttributesForPod(identifier kube.PodIdentifier) map[string]string {
@@ -145,4 +152,12 @@ func (kp *kubernetesprocessor) getAttributesForPodsNamespace(namespace string) m
 		return nil
 	}
 	return ns.Attributes
+}
+
+func (kp *kubernetesprocessor) getAttributesForPodNode(node string) map[string]string {
+	nd, ok := kp.kc.GetNode(node)
+	if !ok {
+		return nil
+	}
+	return map[string]string{TagNodeHostname: nd.HostName}
 }
